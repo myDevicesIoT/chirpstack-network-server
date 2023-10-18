@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Azure/azure-amqp-common-go/cbs"
-	"github.com/Azure/azure-amqp-common-go/sas"
+	"github.com/Azure/azure-amqp-common-go/v4/cbs"
+	"github.com/Azure/azure-amqp-common-go/v4/sas"
 	servicebus "github.com/Azure/azure-service-bus-go"
+	"github.com/Azure/go-amqp"
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"pack.ag/amqp"
 
 	"github.com/brocaar/chirpstack-api/go/v3/gw"
 	"github.com/brocaar/chirpstack-network-server/v3/internal/backend/gateway"
@@ -28,7 +28,6 @@ import (
 // Backend implement an Azure IoT Hub backend.
 type Backend struct {
 	sync.RWMutex
-
 	ctx    context.Context
 	cancel context.CancelFunc
 	closed bool
@@ -43,7 +42,7 @@ type Backend struct {
 	ns        *servicebus.Namespace
 	queue     *servicebus.Queue
 
-	c2dConn            *amqp.Client
+	c2dConn            *amqp.Conn
 	c2dTokenProvider   *sas.TokenProvider
 	c2dTokenExpiration time.Duration
 	c2dHost            string
@@ -380,10 +379,11 @@ func (b *Backend) publishCommand(fields log.Fields, gatewayID lorawan.EUI64, com
 		return errors.Wrap(err, "new uuid error")
 	}
 
+	to := fmt.Sprintf("/devices/%s/messages/devicebound", gatewayID)
 	msg := amqp.NewMessage(data)
 	msg.Properties = &amqp.MessageProperties{
 		MessageID: msgID.String(),
-		To:        fmt.Sprintf("/devices/%s/messages/devicebound", gatewayID),
+		To:        &to,
 	}
 	msg.ApplicationProperties = map[string]interface{}{
 		"iothub-ack": "none",
@@ -400,7 +400,7 @@ func (b *Backend) publishCommand(fields log.Fields, gatewayID lorawan.EUI64, com
 			// aquire a read-lock to make sure an other go routine isn't
 			// recovering / re-connecting in case of an error.
 			b.RLock()
-			err = b.c2dSender.Send(b.ctx, msg)
+			err = b.c2dSender.Send(b.ctx, msg, nil)
 			b.RUnlock()
 			if err == nil {
 				fields["gateway_id"] = gatewayID
@@ -440,7 +440,7 @@ func (b *Backend) publishCommand(fields log.Fields, gatewayID lorawan.EUI64, com
 func (b *Backend) c2dNewSessionAndLink() error {
 	var err error
 	log.WithField("host", b.c2dHost).Info("gateway/azure_iot_hub: connecting to iot hub")
-	b.c2dConn, err = amqp.Dial(fmt.Sprintf("amqps://%s", b.c2dHost), amqp.ConnSASLAnonymous())
+	b.c2dConn, err = amqp.Dial(context.TODO(), fmt.Sprintf("amqps://%s", b.c2dHost), nil)
 	if err != nil {
 		return errors.Wrap(err, "amqp dial error")
 	}
@@ -450,7 +450,7 @@ func (b *Backend) c2dNewSessionAndLink() error {
 		return errors.Wrap(err, "cbs negotiate claim error")
 	}
 
-	b.c2dSession, err = b.c2dConn.NewSession()
+	b.c2dSession, err = b.c2dConn.NewSession(context.TODO(), nil)
 	if err != nil {
 		return errors.Wrap(err, "new amqp session error")
 	}
@@ -462,7 +462,9 @@ func (b *Backend) c2dNewLink() error {
 	var err error
 
 	b.c2dSender, err = b.c2dSession.NewSender(
-		amqp.LinkTargetAddress("/messages/devicebound"),
+		context.TODO(),
+		"/messages/devicebound",
+		nil,
 	)
 	if err != nil {
 		return errors.Wrap(err, "new amqp sender error")
