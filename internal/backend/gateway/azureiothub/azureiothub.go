@@ -11,7 +11,7 @@ import (
 
 	"github.com/Azure/azure-amqp-common-go/v4/cbs"
 	"github.com/Azure/azure-amqp-common-go/v4/sas"
-	servicebus "github.com/Azure/azure-service-bus-go"
+	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
 	"github.com/Azure/go-amqp"
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
@@ -39,8 +39,9 @@ type Backend struct {
 	downMode          string
 
 	queueName string
-	ns        *servicebus.Namespace
-	queue     *servicebus.Queue
+	ns        *azservicebus.Client
+	receiver  *azservicebus.Receiver
+	fetchSize int
 
 	c2dConn            *amqp.Conn
 	c2dTokenProvider   *sas.TokenProvider
@@ -82,41 +83,60 @@ func NewBackend(c config.Config) (gateway.Gateway, error) {
 		return nil, errors.New("connection-string does not contain 'EntityPath', please use the queue connection-string")
 	}
 
+	b.fetchSize = 10
+
 	log.Info("gateway/azure_iot_hub: setting up service-bus namespace")
-	b.ns, err = servicebus.NewNamespace(
-		servicebus.NamespaceWithConnectionString(conf.EventsConnectionString),
-	)
+	// client, err := azservicebus.NewClientFromConnectionString(conf.EventsConnectionString, nil)
+	b.ns, err = azservicebus.NewClientFromConnectionString(conf.EventsConnectionString, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "new namespace error")
 	}
 
-	b.queue, err = b.ns.NewQueue(b.queueName)
+	b.receiver, err = b.ns.NewReceiverForQueue(b.queueName, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "new queue client error")
+		return nil, errors.Wrap(err, "new receiver error")
+	}
+	defer b.receiver.Close(context.Background())
+
+	messages, err := b.receiver.ReceiveMessages(context.Background(), b.fetchSize, nil)
+
+	for _, msg := range messages {
+		fmt.Printf("Message Body: %s\n", string(msg.Body))
+		fmt.Printf("Message Properties: %s\n", string(msg.ApplicationProperties["iothub-connection-device-id"].([]byte)))
+		// Complete the message so it's not received again.
+		err = b.eventHandler(context.Background(), msg)
+		if err != nil {
+			log.Fatalf("Failed to complete message: %v", err)
+		}
 	}
 
-	go func() {
-		log.WithField("queue", b.queueName).Info("gateway/azure_iot_hub: starting queue consumer")
-		for {
-			if b.closed {
-				break
-			}
+	// go func() {
+	// 	log.WithField("queue", b.queueName).Info("gateway/azure_iot_hub: starting queue consumer")
+	// 	for {
+	// 		if b.closed {
+	// 			break
+	// 		}
+	// 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 
-			if err := b.queue.Receive(b.ctx, servicebus.HandlerFunc(b.eventHandler)); err != nil {
-				log.WithError(err).Error("gateway/azure_iot_hub: receive from queue error, trying to recover")
+	// 		messages, err := b.receiver.ReceiveMessages(ctx, b.fetchSize, nil)
+	// 		if err != nil {
+	// 			log.Printf("Failed to receive messages: %v", err)
+	// 			cancel()
+	// 			continue // Continue to the next iteration to try receiving again
+	// 		}
+	// 		cancel()
 
-				err := b.queue.Close(b.ctx)
-				if err != nil {
-					log.WithError(err).Error("gateway/azure_iot_hub: close queue error")
-				}
-
-				b.queue, err = b.ns.NewQueue(b.queueName)
-				if err != nil {
-					log.WithError(err).Error("gateway/azure_iot_hub: new queue client error")
-				}
-			}
-		}
-	}()
+	// 		for _, msg := range messages {
+	// 			fmt.Printf("Message Body: %s\n", string(msg.Body))
+	// 			fmt.Printf("Message Properties: %s\n", string(msg.ApplicationProperties["iothub-connection-device-id"].([]byte)))
+	// 			// Complete the message so it's not received again.
+	// 			err = b.eventHandler(context.Background(), msg)
+	// 			if err != nil {
+	// 				log.Fatalf("Failed to complete message: %v", err)
+	// 			}
+	// 		}
+	// 	}
+	// }()
 
 	// setup Cloud2Device messaging
 	connProperties, err = parseConnectionString(conf.CommandsConnectionString)
@@ -199,7 +219,8 @@ func (b *Backend) Close() error {
 	close(b.uplinkFrameChan)
 	close(b.gatewayStatsChan)
 	close(b.downlinkTxAckChan)
-	b.queue.Close(context.Background())
+	// b.queue.Close(context.Background())
+	b.receiver.Close(context.Background())
 	return nil
 }
 
@@ -217,19 +238,19 @@ func (b *Backend) getGatewayMarshaler(gatewayID lorawan.EUI64) marshaler.Type {
 	return b.gatewayMarshaler[gatewayID]
 }
 
-func (b *Backend) eventHandler(ctx context.Context, msg *servicebus.Message) error {
+func (b *Backend) eventHandler(ctx context.Context, msg *azservicebus.ReceivedMessage) error {
 	if err := b.handleEventMessage(msg); err != nil {
 		log.WithError(err).Error("gateway/azure_iot_hub: handle event error")
 	}
 
-	return msg.Complete(ctx)
+	return b.receiver.CompleteMessage(ctx, msg, nil)
 }
 
-func (b *Backend) handleEventMessage(msg *servicebus.Message) error {
+func (b *Backend) handleEventMessage(msg *azservicebus.ReceivedMessage) error {
 	var gatewayID lorawan.EUI64
 
 	// decode gateway id
-	if gwID, ok := msg.UserProperties["iothub-connection-device-id"]; ok {
+	if gwID, ok := msg.ApplicationProperties["iothub-connection-device-id"]; ok {
 		gwIDStr, ok := gwID.(string)
 		if !ok {
 			return fmt.Errorf("expected 'iothub-connection-device-id' to be a string, got: %T", gwID)
@@ -240,20 +261,20 @@ func (b *Backend) handleEventMessage(msg *servicebus.Message) error {
 		}
 
 	} else {
-		return errors.New("'iothub-connection-device-id' missing in UserProperties")
+		return errors.New("'iothub-connection-device-id' missing in ApplicationProperties")
 	}
 
 	var event string
 	var err error
 
 	// get event type
-	if _, ok := msg.UserProperties["up"]; ok {
+	if _, ok := msg.ApplicationProperties["up"]; ok {
 		event = "up"
 	}
-	if _, ok := msg.UserProperties["ack"]; ok {
+	if _, ok := msg.ApplicationProperties["ack"]; ok {
 		event = "ack"
 	}
-	if _, ok := msg.UserProperties["stats"]; ok {
+	if _, ok := msg.ApplicationProperties["stats"]; ok {
 		event = "stats"
 	}
 
@@ -261,11 +282,11 @@ func (b *Backend) handleEventMessage(msg *servicebus.Message) error {
 
 	switch event {
 	case "up":
-		err = b.handleUplinkFrame(gatewayID, msg.Data)
+		err = b.handleUplinkFrame(gatewayID, msg.Body)
 	case "stats":
-		err = b.handleGatewayStats(gatewayID, msg.Data)
+		err = b.handleGatewayStats(gatewayID, msg.Body)
 	case "ack":
-		err = b.handleDownlinkTXAck(gatewayID, msg.Data)
+		err = b.handleDownlinkTXAck(gatewayID, msg.Body)
 	default:
 		log.WithFields(log.Fields{
 			"gateway_id": gatewayID,
@@ -277,7 +298,7 @@ func (b *Backend) handleEventMessage(msg *servicebus.Message) error {
 		log.WithError(err).WithFields(log.Fields{
 			"gateway_id":  gatewayID,
 			"event":       event,
-			"data_base64": base64.StdEncoding.EncodeToString(msg.Data),
+			"data_base64": base64.StdEncoding.EncodeToString(msg.Body),
 		}).Error("gateway/azure_iot_hub: handle gateway event error")
 	}
 
