@@ -86,57 +86,41 @@ func NewBackend(c config.Config) (gateway.Gateway, error) {
 	b.fetchSize = 10
 
 	log.Info("gateway/azure_iot_hub: setting up service-bus namespace")
-	// client, err := azservicebus.NewClientFromConnectionString(conf.EventsConnectionString, nil)
 	b.ns, err = azservicebus.NewClientFromConnectionString(conf.EventsConnectionString, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "new namespace error")
 	}
 
-	b.receiver, err = b.ns.NewReceiverForQueue(b.queueName, nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "new receiver error")
-	}
-	defer b.receiver.Close(context.Background())
-
-	messages, err := b.receiver.ReceiveMessages(context.Background(), b.fetchSize, nil)
-
-	for _, msg := range messages {
-		fmt.Printf("Message Body: %s\n", string(msg.Body))
-		fmt.Printf("Message Properties: %s\n", string(msg.ApplicationProperties["iothub-connection-device-id"].([]byte)))
-		// Complete the message so it's not received again.
-		err = b.eventHandler(context.Background(), msg)
+	go func() {
+		b.receiver, err = b.ns.NewReceiverForQueue(b.queueName, nil)
 		if err != nil {
-			log.Fatalf("Failed to complete message: %v", err)
+			log.WithError(err).Error("gateway/azure_iot_hub: new receiver error")
 		}
-	}
+		// close the receiver when it's no longer needed
+		defer b.receiver.Close(b.ctx)
+		log.WithField("queue", b.queueName).Info("gateway/azure_iot_hub: starting queue consumer")
+		for {
+			if b.closed {
+				break
+			}
 
-	// go func() {
-	// 	log.WithField("queue", b.queueName).Info("gateway/azure_iot_hub: starting queue consumer")
-	// 	for {
-	// 		if b.closed {
-	// 			break
-	// 		}
-	// 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			messages, err := b.receiver.ReceiveMessages(context.TODO(), b.fetchSize, nil)
+			if err != nil {
+				log.WithError(err).Error("Failed to receive messages")
+				continue // Continue to the next iteration to try receiving again
+			}
 
-	// 		messages, err := b.receiver.ReceiveMessages(ctx, b.fetchSize, nil)
-	// 		if err != nil {
-	// 			log.Printf("Failed to receive messages: %v", err)
-	// 			cancel()
-	// 			continue // Continue to the next iteration to try receiving again
-	// 		}
-	// 		cancel()
-
-	// 		for _, msg := range messages {
-	// 			fmt.Printf("Message Body: %s\n", string(msg.Body))
-	// 			fmt.Printf("Message Properties: %s\n", string(msg.ApplicationProperties["iothub-connection-device-id"].([]byte)))
-	// 			// Complete the message so it's not received again.
-	// 			err = b.eventHandler(context.Background(), msg)
-	// 			if err != nil {
-	// 				log.Fatalf("Failed to complete message: %v", err)
-	// 			}
-	// 		}
-	// 	}
-	// }()
+			for _, msg := range messages {
+				//fmt.Printf("Message Body: %s\n", string(msg.Body))
+				//fmt.Printf("Message Properties: %s\n", string(msg.ApplicationProperties["iothub-connection-device-id"].(string)))
+				// Complete the message so it's not received again.
+				err = b.eventHandler(context.TODO(), msg)
+				if err != nil {
+					log.WithError(err).Error("Failed to handle message")
+				}
+			}
+		}
+	}()
 
 	// setup Cloud2Device messaging
 	connProperties, err = parseConnectionString(conf.CommandsConnectionString)
@@ -219,7 +203,6 @@ func (b *Backend) Close() error {
 	close(b.uplinkFrameChan)
 	close(b.gatewayStatsChan)
 	close(b.downlinkTxAckChan)
-	// b.queue.Close(context.Background())
 	b.receiver.Close(context.Background())
 	return nil
 }
