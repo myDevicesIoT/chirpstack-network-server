@@ -98,7 +98,7 @@ func Handle(ctx context.Context, rxPacket models.RXPacket) error {
 			jctx.filterRxInfoByServiceProfile,
 			jctx.logJoinRequestFramesCollected,
 			jctx.abortOnDeviceIsDisabled,
-			jctx.validateNonce,
+			// jctx.validateNonce, // - skip nonce validation
 			jctx.getRandomDevAddr,
 			jctx.getJoinAcceptFromAS,
 			jctx.sendUplinkMetaDataToNetworkController,
