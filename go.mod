@@ -11,7 +11,7 @@ require (
 	github.com/brocaar/lorawan v0.0.0-20220715134808-3b283dda1534
 	github.com/eclipse/paho.mqtt.golang v1.4.2
 	github.com/go-redis/redis/v8 v8.8.3
-	github.com/gofrs/uuid v3.2.0+incompatible
+	github.com/gofrs/uuid v3.3.0+incompatible
 	github.com/golang-migrate/migrate/v4 v4.14.1
 	github.com/golang/protobuf v1.5.2
 	github.com/goreleaser/goreleaser v0.106.0
@@ -32,7 +32,7 @@ require (
 	github.com/streadway/amqp v0.0.0-20190827072141-edfb9018d271
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b
-	golang.org/x/net v0.8.0
+	golang.org/x/net v0.17.0
 	golang.org/x/tools v0.6.0
 	gonum.org/v1/gonum v0.0.0-20190115205657-1b07048b32c6
 	google.golang.org/api v0.30.0
@@ -44,7 +44,10 @@ require (
 require (
 	cloud.google.com/go v0.65.0 // indirect
 	github.com/Azure/azure-amqp-common-go/v2 v2.1.0 // indirect
-	github.com/Azure/go-amqp v1.0.2 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.8.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/internal v1.4.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus v1.6.0 // indirect
+	github.com/Azure/go-amqp v1.0.4 // indirect
 	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
 	github.com/Azure/go-autorest/autorest v0.11.18 // indirect
 	github.com/Azure/go-autorest/autorest/adal v0.9.13 // indirect
@@ -111,13 +114,13 @@ require (
 	go.opentelemetry.io/otel v0.20.0 // indirect
 	go.opentelemetry.io/otel/metric v0.20.0 // indirect
 	go.opentelemetry.io/otel/trace v0.20.0 // indirect
-	golang.org/x/crypto v0.7.0 // indirect
+	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6 // indirect
 	golang.org/x/mod v0.8.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20220223155221-ee480838109b // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.6.0 // indirect
-	golang.org/x/text v0.8.0 // indirect
+	golang.org/x/sys v0.13.0 // indirect
+	golang.org/x/text v0.13.0 // indirect
 	gonum.org/v1/netlib v0.0.0-20190219113230-9992c5f5eae4 // indirect
 	google.golang.org/appengine v1.6.6 // indirect
 	google.golang.org/genproto v0.0.0-20201030142918-24207fddd1c3 // indirect

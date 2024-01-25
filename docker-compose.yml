@@ -10,23 +10,20 @@ services:
     links:
       - postgres
       - redis
-      - mosquitto
-      - rabbitmq
     environment:
       - DB_AUTOMIGRATE=true
       - NET_ID=010203
       - BAND=EU868
       - REDIS_URL=redis://redis:6379
-      - GW_MQTT_SERVER=tcp://mosquitto:1883
       - GW_SERVER_JWT_SECRET=verysecret
       - POSTGRES_DSN=postgres://chirpstack_ns:chirpstack_ns@postgres/chirpstack_ns?sslmode=disable
-      - TEST_POSTGRES_DSN=postgres://chirpstack_ns:chirpstack_ns@postgres/chirpstack_ns?sslmode=disable
-      - TEST_REDIS_SERVERS=redis:6379
-      - TEST_MQTT_SERVER=tcp://mosquitto:1883
-      - TEST_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - NETWORK_SERVER__GATEWAY__BACKEND__TYPE=azure_iot_hub
+      - NETWORK_SERVER__GATEWAY__BACKEND__AZURE_IOT_HUB__EVENTS_CONNECTION_STRING=Endpoint=sb://as-central-prod-mydev.servicebus.windows.net/;SharedAccessKeyName=chirpstack-ns;SharedAccessKey=V8aKdxh+buVg1mUVy52WfhOD0YUTtCoVX+ASbMsDS+s=;EntityPath=lns-gateway-events
+      - NETWORK_SERVER__GATEWAY__BACKEND__AZURE_IOT_HUB__COMMANDS_CONNECTION_STRING=HostName=au-east-prod-mydev-hub.azure-devices.net;SharedAccessKeyName=chirpstack-ns-au;SharedAccessKey=KWStP37jXVHkG744d1jXjVDEBdNwSjk6t/qY9NXmxQw=
+
 
   postgres:
-    image: postgres:13-alpine
+    image: postgres:15.2-alpine
     environment:
       - POSTGRES_PASSWORD=chirpstack_ns
       - POSTGRES_USER=chirpstack_ns
@@ -34,9 +31,3 @@ services:
 
   redis:
     image: redis:6-alpine
-
-  mosquitto:
-    image: eclipse-mosquitto:1.6
-
-  rabbitmq:
-    image: rabbitmq:3-alpine
