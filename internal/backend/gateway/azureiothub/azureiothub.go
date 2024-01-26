@@ -68,6 +68,7 @@ func NewBackend(c config.Config) (gateway.Gateway, error) {
 		ctx: context.Background(),
 
 		c2dTokenExpiration: time.Hour,
+		fetchSize:          150,
 	}
 
 	b.ctx, b.cancel = context.WithCancel(b.ctx)
@@ -82,8 +83,8 @@ func NewBackend(c config.Config) (gateway.Gateway, error) {
 	if !ok {
 		return nil, errors.New("connection-string does not contain 'EntityPath', please use the queue connection-string")
 	}
-
-	b.fetchSize = 10
+	// b.fetchSize = conf.PrefetchCount
+	// log.Info("gateway/azure_iot_hub: queue size set to %d", b.fetchSize)
 
 	log.Info("gateway/azure_iot_hub: setting up service-bus namespace")
 	b.ns, err = azservicebus.NewClientFromConnectionString(conf.EventsConnectionString, nil)
@@ -396,51 +397,71 @@ func (b *Backend) publishCommand(fields log.Fields, gatewayID lorawan.EUI64, com
 		"command":    command,
 	}
 
-	retries := 0
+	now := time.Now()
+	err = b.c2dSender.Send(b.ctx, msg, nil)
+	if err == nil {
+		fields["gateway_id"] = gatewayID
+		fields["command"] = command
+		fields["c2d_time_elapsed"] = time.Since(now)
+		log.WithFields(fields).Info("gateway/azure_iot_hub: gateway command published")
 
-	for {
-		select {
-		case <-b.ctx.Done():
-			return nil
-		default:
-			// aquire a read-lock to make sure an other go routine isn't
-			// recovering / re-connecting in case of an error.
-			b.RLock()
-			err = b.c2dSender.Send(b.ctx, msg, nil)
-			b.RUnlock()
-			if err == nil {
-				fields["gateway_id"] = gatewayID
-				fields["command"] = command
-				log.WithFields(fields).Info("gateway/azure_iot_hub: gateway command published")
+		azureCommandCounter(command).Inc()
 
-				azureCommandCounter(command).Inc()
-
-				return nil
-			}
-
-			if retries >= 50 {
-				return errors.Wrap(err, "gateway/azure_iot_hub: maximum retries exceeded")
-			} else if retries > 0 {
-				log.WithError(err).Error("gateway/azure_iot_hub: send cloud to device message error")
-			}
-
-			// try to recover connection
-			if strings.Contains(err.Error(), "exceeded the queue limit") {
-				// IoT Hub has a limit of 50 C2D enqueued messages and returns an error if that is exceeded.
-				// In this case we recreate the sender instead of doing a full reconnection.
-				fmt.Println("gateway/azure_iot_hub: exceeded the queue limit, closing sender and retrying")
-				if err := b.c2dRenewSender(); err != nil {
-					log.WithError(err).Error("gateway/azure_iot_hub: recreate sender error, retry in 2 seconds")
-					time.Sleep(2 * time.Second)
-				}
-			} else if err := b.c2dRecover(); err != nil {
-				log.WithError(err).Error("gateway/azure_iot_hub: recover iot hub connection error, retry in 2 seconds")
-				time.Sleep(2 * time.Second)
-			}
-		}
-
-		retries++
+		return nil
+	} else {
+		log.WithError(err).Error("gateway/azure_iot_hub: send cloud to device message error")
 	}
+
+	return err
+
+	// retries := 0
+
+	// for {
+	// 	select {
+	// 	case <-b.ctx.Done():
+	// 		return nil
+	// 	default:
+	// 		// aquire a read-lock to make sure an other go routine isn't
+	// 		// recovering / re-connecting in case of an error.
+	// 		b.RLock()
+	// 		// add a time elapsed field
+	// 		now := time.Now()
+	// 		err = b.c2dSender.Send(b.ctx, msg, nil)
+	// 		b.RUnlock()
+	// 		if err == nil {
+	// 			fields["gateway_id"] = gatewayID
+	// 			fields["command"] = command
+	// 			fields["c2d_time_elapsed"] = time.Since(now)
+	// 			log.WithFields(fields).Info("gateway/azure_iot_hub: gateway command published")
+
+	// 			azureCommandCounter(command).Inc()
+
+	// 			return nil
+	// 		}
+
+	// 		if retries >= 50 {
+	// 			return errors.Wrap(err, "gateway/azure_iot_hub: maximum retries exceeded")
+	// 		} else if retries > 0 {
+	// 			log.WithError(err).Error("gateway/azure_iot_hub: send cloud to device message error")
+	// 		}
+
+	// 		// try to recover connection
+	// 		if strings.Contains(err.Error(), "exceeded the queue limit") {
+	// 			// IoT Hub has a limit of 50 C2D enqueued messages and returns an error if that is exceeded.
+	// 			// In this case we recreate the sender instead of doing a full reconnection.
+	// 			fmt.Println("gateway/azure_iot_hub: exceeded the queue limit, closing sender and retrying")
+	// 			if err := b.c2dRenewSender(); err != nil {
+	// 				log.WithError(err).Error("gateway/azure_iot_hub: recreate sender error, retry in 2 seconds")
+	// 				time.Sleep(2 * time.Second)
+	// 			}
+	// 		} else if err := b.c2dRecover(); err != nil {
+	// 			log.WithError(err).Error("gateway/azure_iot_hub: recover iot hub connection error, retry in 2 seconds")
+	// 			time.Sleep(2 * time.Second)
+	// 		}
+	// 	}
+
+	// 	retries++
+	// }
 }
 
 func (b *Backend) c2dNewSessionAndLink() error {
