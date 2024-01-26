@@ -103,8 +103,10 @@ func NewBackend(c config.Config) (gateway.Gateway, error) {
 			if b.closed {
 				break
 			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 
-			messages, err := b.receiver.ReceiveMessages(context.TODO(), b.fetchSize, nil)
+			messages, err := b.receiver.ReceiveMessages(ctx, b.fetchSize, nil)
 			if err != nil {
 				log.WithError(err).Error("Failed to receive messages")
 				continue // Continue to the next iteration to try receiving again
