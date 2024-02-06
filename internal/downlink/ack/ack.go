@@ -385,7 +385,7 @@ func lockDevice(ctx *ackContext) error {
 	copy(devEUI[:], ctx.DownlinkFrame.DevEui)
 	_, err := storage.GetDevice(ctx.ctx, ctx.DB, devEUI, true)
 	if err != nil {
-		return errors.Wrap(err, "get device error")
+		return errors.Wrap(err, "get device error on downlink")
 	}
 	return nil
 }

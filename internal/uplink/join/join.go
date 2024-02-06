@@ -165,7 +165,7 @@ func (ctx *joinContext) getDeviceOrTryRoaming() error {
 
 			return ErrAbort
 		}
-		return errors.Wrap(err, "get device error")
+		return errors.Wrap(err, "get device error during join")
 	}
 	return nil
 }
