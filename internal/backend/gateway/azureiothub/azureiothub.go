@@ -400,8 +400,13 @@ func (b *Backend) publishCommand(fields log.Fields, gatewayID lorawan.EUI64, com
 			// aquire a read-lock to make sure an other go routine isn't
 			// recovering / re-connecting in case of an error.
 			b.RLock()
-			err = b.c2dSender.Send(b.ctx, msg)
-			b.RUnlock()
+			if b.c2dSender == nil {
+				b.RUnlock()
+				err = errors.New("c2d sender is nil")
+			} else {
+				err = b.c2dSender.Send(b.ctx, msg)
+				b.RUnlock()
+			}
 			if err == nil {
 				fields["gateway_id"] = gatewayID
 				fields["command"] = command
@@ -422,10 +427,14 @@ func (b *Backend) publishCommand(fields log.Fields, gatewayID lorawan.EUI64, com
 			if strings.Contains(err.Error(), "exceeded the queue limit") {
 				// IoT Hub has a limit of 50 C2D enqueued messages and returns an error if that is exceeded.
 				// In this case we recreate the sender instead of doing a full reconnection.
-				fmt.Println("gateway/azure_iot_hub: exceeded the queue limit, closing sender and retrying")
+				log.Warn("gateway/azure_iot_hub: exceeded the queue limit, closing sender and retrying")
 				if err := b.c2dRenewSender(); err != nil {
-					log.WithError(err).Error("gateway/azure_iot_hub: recreate sender error, retry in 2 seconds")
-					time.Sleep(2 * time.Second)
+					log.WithError(err).Error("gateway/azure_iot_hub: recreate sender error, falling back to full reconnect")
+					// sender renewal failed (e.g. unauthorized), attempt a full reconnect
+					if err := b.c2dRecover(); err != nil {
+						log.WithError(err).Error("gateway/azure_iot_hub: recover iot hub connection error, retry in 2 seconds")
+						time.Sleep(2 * time.Second)
+					}
 				}
 			} else if err := b.c2dRecover(); err != nil {
 				log.WithError(err).Error("gateway/azure_iot_hub: recover iot hub connection error, retry in 2 seconds")
@@ -480,9 +489,15 @@ func (b *Backend) c2dRecover() error {
 	azureConnectionRecoverCounter().Inc()
 
 	log.Info("gateway/azure_iot_hub: re-connecting to iot hub")
-	_ = b.c2dSender.Close(b.ctx)
-	_ = b.c2dSession.Close(b.ctx)
-	_ = b.c2dConn.Close()
+	if b.c2dSender != nil {
+		_ = b.c2dSender.Close(b.ctx)
+	}
+	if b.c2dSession != nil {
+		_ = b.c2dSession.Close(b.ctx)
+	}
+	if b.c2dConn != nil {
+		_ = b.c2dConn.Close()
+	}
 
 	return b.c2dNewSessionAndLink()
 }
@@ -494,7 +509,9 @@ func (b *Backend) c2dRenewSender() error {
 	defer b.Unlock()
 
 	log.Info("gateway/azure_iot_hub: re-creating sender")
-	_ = b.c2dSender.Close(b.ctx)
+	if b.c2dSender != nil {
+		_ = b.c2dSender.Close(b.ctx)
+	}
 
 	return b.c2dNewLink()
 }
