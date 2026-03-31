@@ -246,6 +246,17 @@ get_downlink_data_delay="{{ .NetworkServer.GetDownlinkDataDelay }}"
   # 2: RX2 only
   rx_window={{ .NetworkServer.NetworkSettings.RXWindow }}
 
+  # Per-device-profile RX window overrides (optional).
+  #
+  # Override the global rx_window setting for specific device profiles.
+  # If a device profile ID is not listed here, the global rx_window value
+  # is used.
+  #
+  # Example:
+  # [[network_server.network_settings.device_profile_rx_window]]
+  # device_profile_id="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  # rx_window=2
+
   # Class A RX1 delay
   #
   # 0=1sec, 1=1sec, ... 15=15sec. A higher value means ChirpStack Network Server has more

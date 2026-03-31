@@ -86,6 +86,11 @@ type Config struct {
 				MaxCountN int  `mapstructure:"max_count_n"`
 				MaxTimeN  int  `mapstructure:"max_time_n"`
 			} `mapstructure:"rejoin_request"`
+
+			DeviceProfileRXWindow []struct {
+				DeviceProfileID string `mapstructure:"device_profile_id"`
+				RXWindow        int    `mapstructure:"rx_window"`
+			} `mapstructure:"device_profile_rx_window"`
 		} `mapstructure:"network_settings"`
 
 		Scheduler struct {

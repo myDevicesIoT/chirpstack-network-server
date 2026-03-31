@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid"
 	"github.com/golang/protobuf/ptypes/duration"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -1396,7 +1397,9 @@ func TestSetDataTXInfo(t *testing.T) {
 		RXWindow               int
 		RX2PreferOnLinkBudget  bool
 		RX2PreferOnRX1DRLt     int
-		DeviceSession          storage.DeviceSession
+		DeviceProfileID              uuid.UUID
+		DeviceProfileRXWindowOverride int
+		DeviceSession                storage.DeviceSession
 		UplinkFrequency        int
 		DownlinkTXPower        int
 		ExpectedDownlinkTXInfo []*gw.DownlinkTXInfo
@@ -1693,6 +1696,42 @@ func TestSetDataTXInfo(t *testing.T) {
 				},
 			},
 		},
+		{
+			Name:                          "RX2 only - device profile override",
+			RXWindow:                      1,
+			DeviceProfileID:               uuid.FromStringOrNil("01010101-0101-0101-0101-010101010101"),
+			DeviceProfileRXWindowOverride: 2,
+			DeviceSession: storage.DeviceSession{
+				RX2DR:        1,
+				RX2Frequency: 869525000,
+				DR:           3,
+			},
+			UplinkFrequency: 868100000,
+			DownlinkTXPower: -1,
+			ExpectedDownlinkTXInfo: []*gw.DownlinkTXInfo{
+				{
+					Frequency:  869525000,
+					Power:      27,
+					Modulation: common.Modulation_LORA,
+					ModulationInfo: &gw.DownlinkTXInfo_LoraModulationInfo{
+						LoraModulationInfo: &gw.LoRaModulationInfo{
+							Bandwidth:             125,
+							SpreadingFactor:       11,
+							CodeRate:              "4/5",
+							PolarizationInversion: true,
+						},
+					},
+					Timing: gw.DownlinkTiming_DELAY,
+					TimingInfo: &gw.DownlinkTXInfo_DelayTimingInfo{
+						DelayTimingInfo: &gw.DelayTimingInfo{
+							Delay: &duration.Duration{
+								Seconds: 2,
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tst := range tests {
@@ -1707,8 +1746,15 @@ func TestSetDataTXInfo(t *testing.T) {
 			rx2Frequency = tst.DeviceSession.RX2Frequency
 			rx2DR = int(tst.DeviceSession.RX2DR)
 
+			// Reset override map; populate only when the test case specifies a device profile override.
+			deviceProfileRXWindow = map[uuid.UUID]int{}
+			if tst.DeviceProfileID != uuid.Nil && tst.DeviceProfileRXWindowOverride != 0 {
+				deviceProfileRXWindow[tst.DeviceProfileID] = tst.DeviceProfileRXWindowOverride
+			}
+
 			ctx := dataContext{
 				DeviceSession:       tst.DeviceSession,
+				DeviceProfile:       storage.DeviceProfile{ID: tst.DeviceProfileID},
 				DeviceGatewayRXInfo: []storage.DeviceGatewayRXInfo{{}},
 				RXPacket: &models.RXPacket{
 					TXInfo: &gw.UplinkTXInfo{

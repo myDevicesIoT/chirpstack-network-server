@@ -65,6 +65,7 @@ var (
 
 	// RX window
 	rxWindow              int
+	deviceProfileRXWindow map[uuid.UUID]int // per-device-profile rx_window overrides
 	rx2PreferOnRX1DRLt    int
 	rx2PreferOnLinkBudget bool
 
@@ -181,6 +182,27 @@ func Setup(conf config.Config) error {
 	rx1DROffset = nsConf.RX1DROffset
 	rx1Delay = nsConf.RX1Delay
 	rxWindow = nsConf.RXWindow
+
+	// Build device-profile RX window override map.
+	deviceProfileRXWindow = make(map[uuid.UUID]int, len(nsConf.DeviceProfileRXWindow))
+	for _, override := range nsConf.DeviceProfileRXWindow {
+		id, err := uuid.FromString(override.DeviceProfileID)
+		if err != nil {
+			log.WithError(err).WithField("device_profile_id", override.DeviceProfileID).Error("invalid device_profile_id in device_profile_rx_window config, skipping")
+			continue
+		}
+		if override.RXWindow < 0 || override.RXWindow > 2 {
+			log.WithField("device_profile_id", override.DeviceProfileID).
+				WithField("rx_window", override.RXWindow).
+				Error("invalid rx_window value in device_profile_rx_window config (must be 0, 1, or 2), skipping")
+			continue
+		}
+		deviceProfileRXWindow[id] = override.RXWindow
+		log.WithFields(log.Fields{
+			"device_profile_id": id,
+			"rx_window":         override.RXWindow,
+		}).Info("device-profile rx_window override configured")
+	}
 
 	rx2PreferOnRX1DRLt = nsConf.RX2PreferOnRX1DRLt
 	rx2PreferOnLinkBudget = nsConf.RX2PreferOnLinkBudget
@@ -547,7 +569,18 @@ func selectDownlinkGateway(ctx *dataContext) error {
 	return nil
 }
 
+// getEffectiveRXWindow returns the rx_window for the given device profile,
+// falling back to the global rxWindow if no per-profile override exists.
+func getEffectiveRXWindow(deviceProfileID uuid.UUID) int {
+	if w, ok := deviceProfileRXWindow[deviceProfileID]; ok {
+		return w
+	}
+	return rxWindow
+}
+
 func setDataTXInfo(ctx *dataContext) error {
+	effectiveRXWindow := getEffectiveRXWindow(ctx.DeviceProfile.ID)
+
 	preferRX2overRX1, err := preferRX2DR(ctx)
 	if err != nil {
 		return err
@@ -562,7 +595,7 @@ func setDataTXInfo(ctx *dataContext) error {
 	}
 
 	// RX2 is prefered and the RX window is set to automatic.
-	if preferRX2overRX1 && rxWindow == 0 {
+	if preferRX2overRX1 && effectiveRXWindow == 0 {
 		// RX2
 		if err := setTXInfoForRX2(ctx); err != nil {
 			return err
@@ -574,14 +607,14 @@ func setDataTXInfo(ctx *dataContext) error {
 		}
 	} else {
 		// RX1
-		if rxWindow == 0 || rxWindow == 1 {
+		if effectiveRXWindow == 0 || effectiveRXWindow == 1 {
 			if err := setTXInfoForRX1(ctx); err != nil {
 				return err
 			}
 		}
 
 		// RX2
-		if rxWindow == 0 || rxWindow == 2 {
+		if effectiveRXWindow == 0 || effectiveRXWindow == 2 {
 			if err := setTXInfoForRX2(ctx); err != nil {
 				return err
 			}
